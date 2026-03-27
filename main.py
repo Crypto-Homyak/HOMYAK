@@ -1,7 +1,34 @@
-﻿from flask import Flask, jsonify, request
+﻿import json
+
+from aiortc import RTCPeerConnection, RTCSessionDescription
+from flask import Flask, Response, jsonify, render_template, request
+
 
 app = Flask(__name__)
 
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/offer', methods=['POST'])
+async def offer():
+    params = request.json
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+    pc = RTCPeerConnection()
+
+    @pc.on("track")
+    def on_track(track):
+        if track.kind == "video":
+            pc.addTrack(track)
+
+    await pc.setRemoteDescription(offer)
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    return Response(
+        json.dumps({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}),
+        content_type="application/json"
+    )
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -93,4 +120,4 @@ def chat_messages(chat_id):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=1488, debug=True)
+    app.run(host="0.0.0.0", port=14080, debug=True)
