@@ -1,2 +1,4 @@
 .venv
-templates/dist
+templates/dist/
+db/
+data/__pycache__/
