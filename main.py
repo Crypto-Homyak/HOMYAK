@@ -1,123 +1,84 @@
 ﻿import json
+import os
 
-from aiortc import RTCPeerConnection, RTCSessionDescription
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request
+from flask_sock import Sock
 
+from data import db_session
+from data.users import User
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'yandexlyceum_secret_key'
+
+sk = Sock(app)
+
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/offer', methods=['POST'])
-async def offer():
-    params = request.json
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-    pc = RTCPeerConnection()
 
-    @pc.on("track")
-    def on_track(track):
-        if track.kind == "video":
-            pc.addTrack(track)
-
-    await pc.setRemoteDescription(offer)
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    return Response(
-        json.dumps({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}),
-        content_type="application/json"
-    )
-
-@app.route("/register", methods=["GET", "POST"])
+@app.route('/register', methods=['POST'])
 def register():
-    if request.method == "GET":
-        return("регистрация")
-    data = request.get_json(silent=True) or {}
-    username = data.get("username")
-    password = data.get("password")
-    email = data.get("email")
+    d = request.get_json(silent=True) or {}
+    name = (d.get('name') or '').strip()
+    email = (d.get('email') or '').strip().lower()
+    pw = d.get('password') or ''
 
-    return jsonify(
-        {
-            "username": username,
-            "password": password,
-            "email": email,
-        }
-    )
+    if not name or not email or not pw:
+        return jsonify({'ok': False, 'err': 'name,email,password required'}), 400
+
+    s = db_session.get_sess()
+    if s.query(User).filter(User.email == email).first():
+        s.close()
+        return jsonify({'ok': False, 'err': 'email exists'}), 409
+
+    u = User(name=name, email=email)
+    u.set_pw(pw)
+    s.add(u)
+    s.commit()
+
+    out = {'ok': True, 'id': u.id, 'name': u.name, 'email': u.email}
+    s.close()
+    return jsonify(out), 201
 
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route('/login', methods=['POST'])
 def login():
-    if request.method == "GET":
-        return('эта типа логин в аккаунт')
+    d = request.get_json(silent=True) or {}
+    email = (d.get('email') or '').strip().lower()
+    pw = d.get('password') or ''
 
-    data = request.get_json(silent=True) or {}
-    username = data.get("username")
-    password = data.get("password")
+    if not email or not pw:
+        return jsonify({'ok': False, 'err': 'email,password required'}), 400
 
-    return jsonify(
-        {
-            "username": username,
-            "password": password,
-        }
-    )
+    s = db_session.get_sess()
+    u = s.query(User).filter(User.email == email).first()
+    if not u or not u.chk_pw(pw):
+        s.close()
+        return jsonify({'ok': False, 'err': 'bad creds'}), 401
 
-
-@app.route("/logout", methods=["GET", "POST"])
-def logout():
-    if request.method == "GET":
-        return('хз будет тут стрница или нет, но тут будет логаут')
-
-    data = request.get_json(silent=True) or {}
-    token = data.get("token")
-
-    return jsonify({"token": token})
+    out = {'ok': True, 'id': u.id, 'name': u.name, 'email': u.email}
+    s.close()
+    return jsonify(out)
 
 
-@app.route("/users", methods=["GET", "POST"])
-def users():
-    data = request.get_json(silent=True) or {}
-    query = data.get("query")
-    limit = data.get("limit")
-
-    return jsonify(
-        {
-            "query": query,
-            "limit": limit,
-        }
-    )
+@app.route('/ws-ready', methods=['GET'])
+def ws_ready():
+    return jsonify({'ok': True, 'ws': '/ws'})
 
 
-@app.route("/chats", methods=["GET", "POST"])
-def chats():
-    data = request.get_json(silent=True) or {}
-    title = data.get("title")
-    member_ids = data.get("member_ids")
-
-    return jsonify(
-        {
-            "title": title,
-            "member_ids": member_ids,
-        }
-    )
+@sk.route('/ws')
+def ws(ws):
+    ws.send(json.dumps({'ok': True, 'msg': 'ws up'}))
+    while True:
+        m = ws.receive()
+        if m is None:
+            break
+        ws.send(json.dumps({'ok': True, 'echo': m}))
 
 
-@app.route("/chats/<int:chat_id>/messages", methods=["GET", "POST"])
-def chat_messages(chat_id):
-    data = request.get_json(silent=True) or {}
-    text = data.get("text")
-    sender_id = data.get("sender_id")
-
-    return jsonify(
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "sender_id": sender_id,
-        }
-    )
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=14080, debug=True)
+if __name__ == '__main__':
+    os.makedirs('db', exist_ok=True)
+    db_session.init_db('db/messenger.db')
+    app.run(host='0.0.0.0', port=14080, debug=True)

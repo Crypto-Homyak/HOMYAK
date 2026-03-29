@@ -1,6 +1,8 @@
 ﻿import datetime as dt
 import sqlalchemy as sa
 from sqlalchemy import orm
+from werkzeug.security import check_password_hash, generate_password_hash
+
 from .db_session import Base
 
 
@@ -15,3 +17,9 @@ class User(Base):
 
     chats = orm.relationship('Chat', secondary='chat_members', back_populates='users')
     msgs = orm.relationship('Message', back_populates='user')
+
+    def set_pw(self, pw):
+        self.hp = generate_password_hash(pw)
+
+    def chk_pw(self, pw):
+        return check_password_hash(self.hp, pw)
