@@ -7,7 +7,12 @@ from flask_sock import Sock
 from data import db_session
 from data.users import User
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder='./templates/dist',
+    template_folder='./templates/dist',
+    static_url_path=''
+    )
 app.config['SECRET_KEY'] = 'yandexlyceum_secret_key'
 
 sk = Sock(app)
