@@ -1,85 +1,116 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
-import HelloWorld from './components/HelloWorld.vue'
+import { ref } from 'vue'
+
+const isOpen = ref(false)
+
+const togglePanel = () => {
+  isOpen.value = !isOpen.value
+}
 </script>
 
 <template>
-  <header>
-    <img alt="Vue logo" class="logo" src="@/assets/logo.svg" width="125" height="125" />
+  <div class="chats-div">
+    <button @click="togglePanel" class="chatop">
+      <img src="@/assets/icons/chats.gif" alt="icon" class="chats_icon">
+    </button>
+  </div>
 
-    <div class="wrapper">
-      <HelloWorld msg="You did it!" />
+  <div class="main-content">
+    <p>CHAT</p>
+  </div>
 
-      <nav>
-        <RouterLink to="/">Home</RouterLink>
-        <RouterLink to="/about">About</RouterLink>
-      </nav>
+  <Transition name="slide">
+    <div v-if="isOpen" class="top-panel">
+      <div class="panel-inner-content">
+        <h2>HOMYAK CHATS</h2>
+        <ul>
+          <li>
+            <button class="list-btn">HOMYAK CHATS</button>
+          </li>
+        </ul>
+        <button @click="isOpen = false" class="close-btn">CHATTING</button>
+      </div>
     </div>
-  </header>
-
-  <RouterView />
+  </Transition>
 </template>
 
 <style scoped>
-header {
-  line-height: 1.5;
-  max-height: 100vh;
+:global(body) {
+  background-color: #1a1a1a;
+  color: #ffffff;
+  margin: 0;
+  display: flex;
+  height: 100vh;
 }
 
-.logo {
-  display: block;
-  margin: 0 auto 2rem;
+.chats-div {
+  height: 100vh;
+  width: 100px;
+  background-color: #252525;
+  display: flex;
+  justify-content: center;
+  padding-top: 20px;
+  flex-shrink: 0;
+  z-index: 1001;
 }
 
-nav {
+.chatop {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: transparent; 
+  border: none;       
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;   
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chats_icon {
+  width: 100%;    
+  height: 100%;
+  object-fit: cover;   
+}
+
+.main-content {
+  flex-grow: 1;
+  padding: 20px;
+}
+
+.top-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
   width: 100%;
-  font-size: 12px;
-  text-align: center;
-  margin-top: 2rem;
+  height: 200px;
+  background-color: #272727;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  border-bottom: 1px solid #444;
 }
 
-nav a.router-link-exact-active {
-  color: var(--color-text);
+.panel-inner-content {
+  padding: 20px 20px 20px 120px;
 }
 
-nav a.router-link-exact-active:hover {
-  background-color: transparent;
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease-out;
 }
 
-nav a {
-  display: inline-block;
-  padding: 0 1rem;
-  border-left: 1px solid var(--color-border);
+.slide-enter-from,
+.slide-leave-to {
+  transform: translateY(-100%);
 }
 
-nav a:first-of-type {
-  border: 0;
-}
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
-  }
-
-  .logo {
-    margin: 0 2rem 0 0;
-  }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  nav {
-    text-align: left;
-    margin-left: -1rem;
-    font-size: 1rem;
-
-    padding: 1rem 0;
-    margin-top: 1rem;
-  }
+.list-btn, .close-btn {
+  background: #333;
+  color: white;
+  border: 1px solid #555;
+  padding: 8px 16px;
+  margin-top: 10px;
+  cursor: pointer;
 }
 </style>
