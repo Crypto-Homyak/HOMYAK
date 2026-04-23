@@ -20,6 +20,9 @@ def _fix_users():
     if 'username' not in cols:
         with _eng.begin() as c:
             c.exec_driver_sql('ALTER TABLE users ADD COLUMN username VARCHAR')
+    if 'avatar' not in cols:
+        with _eng.begin() as c:
+            c.exec_driver_sql("ALTER TABLE users ADD COLUMN avatar VARCHAR DEFAULT ''")
 
     with _eng.begin() as c:
         rows = c.exec_driver_sql('SELECT id, email, name, username FROM users').fetchall()

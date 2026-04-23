@@ -13,6 +13,7 @@ class User(Base):
     name = sa.Column(sa.String, nullable=False)
     username = sa.Column(sa.String, unique=True, index=True, nullable=True)
     email = sa.Column(sa.String, unique=True, index=True, nullable=False)
+    avatar = sa.Column(sa.String, nullable=True, default='')
     hp = sa.Column(sa.String, nullable=False)
     cdt = sa.Column(sa.DateTime, default=dt.datetime.now)
 
