@@ -3,28 +3,28 @@ import sqlalchemy.orm as so
 from sqlalchemy.orm import Session
 
 Base = so.declarative_base()
-_sf = None
-_eng = None
+sfac = None
+eng = None
 
 
-def _fix_users():
-    global _eng
-    if _eng is None:
+def fixuser():
+    global eng
+    if eng is None:
         return
 
-    ins = sa.inspect(_eng)
+    ins = sa.inspect(eng)
     if 'users' not in ins.get_table_names():
         return
 
     cols = {c['name'] for c in ins.get_columns('users')}
     if 'username' not in cols:
-        with _eng.begin() as c:
+        with eng.begin() as c:
             c.exec_driver_sql('ALTER TABLE users ADD COLUMN username VARCHAR')
     if 'avatar' not in cols:
-        with _eng.begin() as c:
+        with eng.begin() as c:
             c.exec_driver_sql("ALTER TABLE users ADD COLUMN avatar VARCHAR DEFAULT ''")
 
-    with _eng.begin() as c:
+    with eng.begin() as c:
         rows = c.exec_driver_sql('SELECT id, email, name, username FROM users').fetchall()
         used = set()
         for r in rows:
@@ -51,24 +51,66 @@ def _fix_users():
             used.add(cand.lower())
             c.exec_driver_sql('UPDATE users SET username = ? WHERE id = ?', (cand, uid))
 
-    with _eng.begin() as c:
+    with eng.begin() as c:
         c.exec_driver_sql('CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)')
 
 
+def fixcmm():
+    global eng
+    if eng is None:
+        return
+
+    ins = sa.inspect(eng)
+    tables = set(ins.get_table_names())
+    if 'chats' in tables:
+        chat_cols = {c['name'] for c in ins.get_columns('chats')}
+        if 'kind' not in chat_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql("ALTER TABLE chats ADD COLUMN kind VARCHAR DEFAULT 'dm'")
+        if 'owner_id' not in chat_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql('ALTER TABLE chats ADD COLUMN owner_id INTEGER')
+        with eng.begin() as c:
+            c.exec_driver_sql(
+                "UPDATE chats SET kind = CASE WHEN is_grp = 1 THEN 'group' ELSE 'dm' END WHERE kind IS NULL OR TRIM(kind) = ''"
+            )
+
+    if 'chat_members' in tables:
+        cm_cols = {c['name'] for c in ins.get_columns('chat_members')}
+        if 'role' not in cm_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql("ALTER TABLE chat_members ADD COLUMN role VARCHAR DEFAULT 'member'")
+        with eng.begin() as c:
+            c.exec_driver_sql("UPDATE chat_members SET role = 'member' WHERE role IS NULL OR TRIM(role) = ''")
+
+    if 'messages' in tables:
+        msg_cols = {c['name'] for c in ins.get_columns('messages')}
+        if 'kind' not in msg_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql("ALTER TABLE messages ADD COLUMN kind VARCHAR DEFAULT 'text'")
+        if 'meta' not in msg_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql("ALTER TABLE messages ADD COLUMN meta VARCHAR DEFAULT ''")
+        with eng.begin() as c:
+            c.exec_driver_sql("UPDATE messages SET kind = 'text' WHERE kind IS NULL OR TRIM(kind) = ''")
+            c.exec_driver_sql("UPDATE messages SET meta = '' WHERE meta IS NULL")
+
+
 def init_db(dbf):
-    global _sf, _eng
-    if _sf:
+    global sfac, eng
+    if sfac:
         return
     if not dbf or not dbf.strip():
         raise Exception('db path required')
     cs = f"sqlite:///{dbf.strip()}?check_same_thread=False"
-    _eng = sa.create_engine(cs, echo=False)
-    _sf = so.sessionmaker(bind=_eng)
+    eng = sa.create_engine(cs, echo=False)
+    sfac = so.sessionmaker(bind=eng)
     from . import __all_models
-    Base.metadata.create_all(_eng)
-    _fix_users()
+    Base.metadata.create_all(eng)
+    fixuser()
+    fixcmm()
 
 
 def get_sess() -> Session:
-    global _sf
-    return _sf()
+    global sfac
+    return sfac()
