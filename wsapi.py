@@ -1,18 +1,62 @@
 import json
+import datetime as dt
 
 from data import db_session
 from data.chat_members import ChatMember
 from data.chats import Chat
+from data.call_logs import CallLog
 from data.messages import Message
 from data.users import User
 from logic import cids, cpack, crole, cwrite, dmget, lstchat, mkchat, mout, uout, cmng
-from util import jstr, toint
-from wshub import wsadd, wsdel, wspush
+from util import avurl, jstr, toint
+from wshub import wsadd, wsdel, wspush, wson, wsuids
 from authz import tokok
 from conf import ctok
+from sqlalchemy.orm import aliased
 
 
 def bindws(sk, hub):
+    def push_presence(uid, online):
+        uid = int(uid)
+        pay = {'act': 'presence', 'ok': True, 'uid': uid, 'online': bool(online)}
+        s = db_session.get_sess()
+        try:
+            me = aliased(ChatMember)
+            pe = aliased(ChatMember)
+            pids = (
+                s.query(pe.uid)
+                .join(me, me.cid == pe.cid)
+                .filter(me.uid == uid, pe.uid != uid)
+                .distinct()
+                .all()
+            )
+            for row in pids:
+                wspush(int(row[0]), pay)
+        finally:
+            s.close()
+
+    def mk_call_hist(log, vid, peer):
+        st = (log.status or 'ringing').strip().lower()
+        dr = int(log.duration or 0)
+        ts = log.started.isoformat() if log.started else None
+        way = 'out' if int(log.caller_id) == int(vid) else 'in'
+        return {
+            'id': log.id,
+            'cid': log.cid,
+            'chat': int(log.chat_id),
+            'status': st,
+            'duration': dr,
+            'ts': ts,
+            'dir': way,
+            'peer': {
+                'id': int(peer.id) if peer else 0,
+                'username': (peer.username if peer else ''),
+                'name': (peer.name if peer else ''),
+                'avatar': avurl((peer.avatar if peer else '') or ''),
+                'online': (wson(peer.id) if peer else False),
+            },
+        }
+
     @sk.route('/ws')
     @sk.route('/api/ws')
     def ws(ws):
@@ -53,6 +97,8 @@ def bindws(sk, hub):
                         uid = nid
                         wsadd(uid, ws)
                         ws.send(jstr({'act': 'auth', 'ok': True, 'user': uout(usr)}))
+                        ws.send(jstr({'act': 'presence_bulk', 'ok': True, 'uids': wsuids()}))
+                        push_presence(uid, True)
                     finally:
                         s.close()
                     continue
@@ -74,7 +120,8 @@ def bindws(sk, hub):
                                 'id': x.id,
                                 'username': x.username,
                                 'name': x.name,
-                                'avatar': (x.avatar or '').strip(),
+                                'avatar': avurl(x.avatar),
+                                'online': wson(x.id),
                             }
                             for x in rows
                             if x.id != uid
@@ -313,6 +360,74 @@ def bindws(sk, hub):
                         s.close()
                     continue
 
+                if act == 'chat_delself':
+                    if uid <= 0:
+                        ws.send(jstr({'act': 'chat_delself', 'ok': False, 'err': 'auth first'}))
+                        continue
+                    cid = toint(dat.get('cid'))
+                    s = db_session.get_sess()
+                    try:
+                        chat = s.get(Chat, cid)
+                        me = crole(s, cid, uid)
+                        if not chat or not me:
+                            ws.send(jstr({'act': 'chat_delself', 'ok': False, 'err': 'forbidden'}))
+                            continue
+
+                        all_ids = cids(s, cid)
+                        owner = int(chat.owner_id or 0) == int(uid)
+                        knd = (chat.kind or 'dm').strip().lower()
+
+                        if owner and knd in {'group', 'channel'}:
+                            s.delete(chat)
+                            s.commit()
+                            for mid in all_ids:
+                                wspush(mid, {'act': 'chat_del', 'ok': True, 'cid': cid})
+                            ws.send(jstr({'act': 'chat_delself', 'ok': True, 'cid': cid, 'full': True}))
+                            continue
+
+                        s.delete(me)
+                        s.commit()
+                        left_ids = cids(s, cid)
+                        if not left_ids:
+                            zchat = s.get(Chat, cid)
+                            if zchat:
+                                s.delete(zchat)
+                                s.commit()
+                        else:
+                            zchat = s.get(Chat, cid)
+                            if zchat:
+                                for mid in left_ids:
+                                    wspush(mid, {'act': 'chat_upd', 'ok': True, 'chat': cpack(s, zchat, mid)})
+                        wspush(uid, {'act': 'chat_del', 'ok': True, 'cid': cid})
+                        ws.send(jstr({'act': 'chat_delself', 'ok': True, 'cid': cid, 'full': False}))
+                    finally:
+                        s.close()
+                    continue
+
+                if act == 'call_hist':
+                    if uid <= 0:
+                        ws.send(jstr({'act': 'call_hist', 'ok': False, 'err': 'auth first'}))
+                        continue
+                    lim = max(1, min(toint(dat.get('lim'), 50), 200))
+                    s = db_session.get_sess()
+                    try:
+                        rows = (
+                            s.query(CallLog)
+                            .filter((CallLog.caller_id == uid) | (CallLog.callee_id == uid))
+                            .order_by(CallLog.id.desc())
+                            .limit(lim)
+                            .all()
+                        )
+                        out = []
+                        for x in rows:
+                            pid = x.callee_id if int(x.caller_id) == uid else x.caller_id
+                            peer = s.get(User, int(pid))
+                            out.append(mk_call_hist(x, uid, peer))
+                        ws.send(jstr({'act': 'call_hist', 'ok': True, 'items': out}))
+                    finally:
+                        s.close()
+                    continue
+
                 if act == 'send_msg':
                     if uid <= 0:
                         ws.send(jstr({'act': 'send_msg', 'ok': False, 'err': 'auth first'}))
@@ -321,6 +436,7 @@ def bindws(sk, hub):
                     txt = (dat.get('txt') or '').strip()
                     knd = (dat.get('kind') or '').strip().lower()
                     url = (dat.get('url') or '').strip()
+                    fname = (dat.get('fname') or '').strip()
                     if cid <= 0:
                         ws.send(jstr({'act': 'send_msg', 'ok': False, 'err': 'cid required'}))
                         continue
@@ -351,7 +467,7 @@ def bindws(sk, hub):
                             ws.send(jstr({'act': 'send_msg', 'ok': False, 'err': 'write forbidden'}))
                             continue
 
-                        msg = Message(uid=uid, cid=cid, txt=txt, kind=knd, meta=url)
+                        msg = Message(uid=uid, cid=cid, txt=txt, kind=knd, meta=url, mname=fname[:255])
                         s.add(msg)
                         s.commit()
 
@@ -402,6 +518,11 @@ def bindws(sk, hub):
                             oth = uo.id
 
                         cl = hub.make(uid, oth)
+                        lg = s.query(CallLog).filter(CallLog.cid == cl.cid).order_by(CallLog.id.desc()).first()
+                        if not lg:
+                            lg = CallLog(cid=cl.cid, chat_id=chat.id, caller_id=uid, callee_id=oth, status='ringing')
+                            s.add(lg)
+                            s.commit()
                         me = s.get(User, uid)
                         wspush(uid, {'act': 'call_ring', 'ok': True, 'cid': cl.cid, 'chat': chat.id})
                         wspush(oth, {
@@ -413,6 +534,7 @@ def bindws(sk, hub):
                                 'id': uid,
                                 'username': (me.username if me else ''),
                                 'name': (me.name if me else ''),
+                                'avatar': avurl((me.avatar if me else '') or ''),
                             },
                         })
                         ws.send(jstr({'act': 'call_start', 'ok': True, 'cid': cl.cid, 'chat': chat.id}))
@@ -430,6 +552,15 @@ def bindws(sk, hub):
                         continue
                     cl = hub.get(cid)
                     hub.acc(cid)
+                    s = db_session.get_sess()
+                    try:
+                        lg = s.query(CallLog).filter(CallLog.cid == cid).order_by(CallLog.id.desc()).first()
+                        if lg:
+                            lg.status = 'talk'
+                            lg.accepted = dt.datetime.now()
+                            s.commit()
+                    finally:
+                        s.close()
                     wspush(cl.a, {'act': 'call_go', 'ok': True, 'cid': cid})
                     wspush(cl.b, {'act': 'call_go', 'ok': True, 'cid': cid})
                     ws.send(jstr({'act': 'call_acc', 'ok': True, 'cid': cid}))
@@ -445,6 +576,16 @@ def bindws(sk, hub):
                         continue
                     cl = hub.get(cid)
                     hub.rej(cid)
+                    s = db_session.get_sess()
+                    try:
+                        lg = s.query(CallLog).filter(CallLog.cid == cid).order_by(CallLog.id.desc()).first()
+                        if lg:
+                            lg.status = 'rejected'
+                            lg.ended = dt.datetime.now()
+                            lg.duration = 0
+                            s.commit()
+                    finally:
+                        s.close()
                     if cl:
                         wspush(cl.a, {'act': 'call_stop', 'ok': True, 'cid': cid, 'why': 'rejected'})
                         wspush(cl.b, {'act': 'call_stop', 'ok': True, 'cid': cid, 'why': 'rejected'})
@@ -461,6 +602,21 @@ def bindws(sk, hub):
                         continue
                     cl = hub.get(cid)
                     hub.end(cid)
+                    s = db_session.get_sess()
+                    try:
+                        lg = s.query(CallLog).filter(CallLog.cid == cid).order_by(CallLog.id.desc()).first()
+                        if lg:
+                            now = dt.datetime.now()
+                            lg.ended = now
+                            if lg.accepted:
+                                lg.status = 'ended'
+                                lg.duration = int((now - lg.accepted).total_seconds())
+                            else:
+                                lg.status = 'missed'
+                                lg.duration = 0
+                            s.commit()
+                    finally:
+                        s.close()
                     if cl:
                         wspush(cl.a, {'act': 'call_stop', 'ok': True, 'cid': cid, 'why': 'ended'})
                         wspush(cl.b, {'act': 'call_stop', 'ok': True, 'cid': cid, 'why': 'ended'})
@@ -511,3 +667,5 @@ def bindws(sk, hub):
         finally:
             if uid > 0:
                 wsdel(uid, ws)
+                if not wson(uid):
+                    push_presence(uid, False)

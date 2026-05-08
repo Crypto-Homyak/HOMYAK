@@ -40,3 +40,14 @@ def wspush(uid, pay):
                 cur.discard(ws)
             if not cur:
                 wsmap.pop(uid, None)
+
+
+def wson(uid):
+    with wslk:
+        arr = wsmap.get(int(uid), set())
+        return bool(arr)
+
+
+def wsuids():
+    with wslk:
+        return [int(x) for x in wsmap.keys()]

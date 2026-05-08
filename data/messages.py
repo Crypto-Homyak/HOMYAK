@@ -11,6 +11,7 @@ class Message(Base):
     txt = sa.Column(sa.String, nullable=False)
     kind = sa.Column(sa.String, nullable=False, default='text')  # text|file|voice
     meta = sa.Column(sa.String, nullable=False, default='')
+    mname = sa.Column(sa.String, nullable=False, default='')
     cdt = sa.Column(sa.DateTime, default=dt.datetime.now)
 
     uid = sa.Column(sa.Integer, sa.ForeignKey('users.id'), nullable=False, index=True)

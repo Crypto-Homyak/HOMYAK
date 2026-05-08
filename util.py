@@ -1,4 +1,5 @@
 import json
+from conf import pubapi
 
 
 def jstr(v):
@@ -12,14 +13,31 @@ def toint(v, d=0):
         return d
 
 
+def _abs_api(path):
+    p = (path or '').strip()
+    if not p:
+        return ''
+    if p.startswith('http://') or p.startswith('https://'):
+        return p
+    if not p.startswith('/'):
+        p = f'/{p}'
+    if p.startswith('/api/'):
+        p = p[4:]
+    return f'{pubapi}{p}'
+
+
 def avurl(raw):
     val = (raw or '').strip()
     if not val:
         return ''
     if val.startswith('/api/avatar/'):
-        return val
+        return _abs_api(val)
     if val.startswith('/avatar/'):
-        return f'/api{val}'
+        return _abs_api(val)
+    if val.startswith('api/avatar/'):
+        return _abs_api(val)
+    if val.startswith('avatar/'):
+        return _abs_api(val)
     return val
 
 

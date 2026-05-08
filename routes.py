@@ -16,15 +16,48 @@ from wshub import wspush
 
 
 def bindrt(app):
-    @app.route('/')
+    def push_user(uid, out):
+        wspush(uid, {'act': 'user_upd', 'ok': True, 'user': out})
+        s = db_session.get_sess()
+        try:
+            me = aliased(ChatMember)
+            pe = aliased(ChatMember)
+            pids = (
+                s.query(pe.uid)
+                .join(me, me.cid == pe.cid)
+                .filter(me.uid == uid, pe.uid != uid)
+                .distinct()
+                .all()
+            )
+            for row in pids:
+                wspush(int(row[0]), {'act': 'user_upd', 'ok': True, 'user': out})
+        finally:
+            s.close()
+
+    def has_front():
+        if not app.static_folder:
+            return False
+        return os.path.isfile(os.path.join(app.static_folder, 'index.html'))
+
     @app.route('/api')
     def idx():
         return jsonify({'ok': True, 'service': 'messenger-backend'})
+
+    @app.route('/')
+    def front():
+        if has_front():
+            return app.send_static_file('index.html')
+        return jsonify({'ok': True, 'service': 'messenger-frontend-missing'})
 
     @app.route('/avatar/<path:name>', methods=['GET'])
     @app.route('/api/avatar/<path:name>', methods=['GET'])
     def avget(name):
         return send_from_directory(avdir, name)
+
+    @app.route('/sounds/<path:name>', methods=['GET'])
+    @app.route('/api/sounds/<path:name>', methods=['GET'])
+    def sndget(name):
+        return send_from_directory('sounds', name)
 
     @app.route('/avatar/upload', methods=['POST'])
     @app.route('/api/avatar/upload', methods=['POST'])
@@ -58,23 +91,7 @@ def bindrt(app):
         finally:
             s.close()
 
-        wspush(uid, {'act': 'user_upd', 'ok': True, 'user': out})
-
-        s = db_session.get_sess()
-        try:
-            me = aliased(ChatMember)
-            pe = aliased(ChatMember)
-            pids = (
-                s.query(pe.uid)
-                .join(me, me.cid == pe.cid)
-                .filter(me.uid == uid, pe.uid != uid)
-                .distinct()
-                .all()
-            )
-            for row in pids:
-                wspush(int(row[0]), {'act': 'user_upd', 'ok': True, 'user': out})
-        finally:
-            s.close()
+        push_user(uid, out)
 
         return jsonify({'ok': True, 'user': out})
 
@@ -147,6 +164,62 @@ def bindrt(app):
         finally:
             s.close()
 
+    @app.route('/profile', methods=['POST'])
+    @app.route('/api/profile', methods=['POST'])
+    def profile_upd():
+        uid = requid(ctok)
+        if uid <= 0:
+            return jsonify({'ok': False, 'err': 'unauthorized'}), 401
+        dat = request.get_json(silent=True) or {}
+        s = db_session.get_sess()
+        try:
+            usr = s.get(User, uid)
+            if not usr:
+                return jsonify({'ok': False, 'err': 'unauthorized'}), 401
+
+            name = (dat.get('name') or '').strip()
+            bio = (dat.get('bio') or '').strip()
+            phone = (dat.get('phone') or '').strip()
+            uname = (dat.get('username') or '').strip().lower()
+
+            if name:
+                usr.name = name[:64]
+            usr.bio = bio[:280]
+            usr.phone = phone[:32]
+
+            if uname:
+                if len(uname) < 3 or len(uname) > 32:
+                    return jsonify({'ok': False, 'err': 'username len 3..32'}), 400
+                if any(ch.isspace() for ch in uname):
+                    return jsonify({'ok': False, 'err': 'username without spaces'}), 400
+                got = s.query(User).filter(User.username == uname, User.id != uid).first()
+                if got:
+                    return jsonify({'ok': False, 'err': 'username exists'}), 409
+                usr.username = uname
+
+            s.commit()
+            out = uout(usr)
+        finally:
+            s.close()
+
+        push_user(uid, out)
+        return jsonify({'ok': True, 'user': out})
+
+    @app.route('/users/<string:uname>', methods=['GET'])
+    @app.route('/api/users/<string:uname>', methods=['GET'])
+    def user_pub(uname):
+        un = (uname or '').strip().lower()
+        if not un:
+            return jsonify({'ok': False, 'err': 'username required'}), 400
+        s = db_session.get_sess()
+        try:
+            usr = s.query(User).filter(User.username == un).first()
+            if not usr:
+                return jsonify({'ok': False, 'err': 'not found'}), 404
+            return jsonify({'ok': True, 'user': uout(usr)})
+        finally:
+            s.close()
+
     @app.route('/ws-ready', methods=['GET'])
     @app.route('/api/ws-ready', methods=['GET'])
     def wrdy():
@@ -161,16 +234,35 @@ def bindrt(app):
                 'chat_add',
                 'chat_setadm',
                 'chat_kick',
+                'chat_delself',
                 'recent_chats',
                 'get_chats',
                 'get_msgs',
                 'send_msg',
+                'presence',
+                'presence_bulk',
                 'call_start',
                 'call_acc',
                 'call_rej',
                 'call_end',
                 'call_offer',
                 'call_ice',
+                'call_hist',
             ],
             'err': None,
         })
+
+    @app.route('/<path:path>', methods=['GET'])
+    def spa(path):
+        if not has_front():
+            return jsonify({'ok': False, 'err': 'frontend missing'}), 404
+        if path.startswith('api/') or path.startswith('avatar/') or path.startswith('ws'):
+            return jsonify({'ok': False, 'err': 'not found'}), 404
+        if app.static_folder:
+            full = os.path.join(app.static_folder, path)
+            if os.path.isfile(full):
+                return app.send_static_file(path)
+        leaf = path.rsplit('/', 1)[-1]
+        if '.' in leaf:
+            return jsonify({'ok': False, 'err': 'not found'}), 404
+        return app.send_static_file('index.html')

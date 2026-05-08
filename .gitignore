@@ -5,3 +5,4 @@ data/__pycache__/
 node_modules/
 __pycache__
 AITests
+templates/hamster/package-lock.json

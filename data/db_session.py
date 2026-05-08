@@ -23,6 +23,12 @@ def fixuser():
     if 'avatar' not in cols:
         with eng.begin() as c:
             c.exec_driver_sql("ALTER TABLE users ADD COLUMN avatar VARCHAR DEFAULT ''")
+    if 'phone' not in cols:
+        with eng.begin() as c:
+            c.exec_driver_sql("ALTER TABLE users ADD COLUMN phone VARCHAR DEFAULT ''")
+    if 'bio' not in cols:
+        with eng.begin() as c:
+            c.exec_driver_sql("ALTER TABLE users ADD COLUMN bio VARCHAR DEFAULT ''")
 
     with eng.begin() as c:
         rows = c.exec_driver_sql('SELECT id, email, name, username FROM users').fetchall()
@@ -91,9 +97,28 @@ def fixcmm():
         if 'meta' not in msg_cols:
             with eng.begin() as c:
                 c.exec_driver_sql("ALTER TABLE messages ADD COLUMN meta VARCHAR DEFAULT ''")
+        if 'mname' not in msg_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql("ALTER TABLE messages ADD COLUMN mname VARCHAR DEFAULT ''")
         with eng.begin() as c:
             c.exec_driver_sql("UPDATE messages SET kind = 'text' WHERE kind IS NULL OR TRIM(kind) = ''")
             c.exec_driver_sql("UPDATE messages SET meta = '' WHERE meta IS NULL")
+            c.exec_driver_sql("UPDATE messages SET mname = '' WHERE mname IS NULL")
+
+    if 'call_logs' in tables:
+        cl_cols = {c['name'] for c in ins.get_columns('call_logs')}
+        if 'duration' not in cl_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql('ALTER TABLE call_logs ADD COLUMN duration INTEGER DEFAULT 0')
+        if 'accepted' not in cl_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql('ALTER TABLE call_logs ADD COLUMN accepted DATETIME')
+        if 'ended' not in cl_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql('ALTER TABLE call_logs ADD COLUMN ended DATETIME')
+        if 'status' in cl_cols:
+            with eng.begin() as c:
+                c.exec_driver_sql("UPDATE call_logs SET status = 'ringing' WHERE status IS NULL OR TRIM(status) = ''")
 
 
 def init_db(dbf):

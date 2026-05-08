@@ -5,6 +5,7 @@ from data.chats import Chat
 from data.messages import Message
 from data.users import User
 from util import avurl, murl
+from wshub import wson
 
 
 def uout(u):
@@ -14,6 +15,9 @@ def uout(u):
         'name': u.name,
         'email': u.email,
         'avatar': avurl(u.avatar),
+        'phone': (u.phone or '').strip(),
+        'bio': (u.bio or '').strip(),
+        'online': wson(u.id),
     }
 
 
@@ -43,6 +47,7 @@ def mout(msg, uname, name, avatar):
         'txt': msg.txt,
         'kind': knd,
         'url': url,
+        'fname': ((msg.mname or '').strip() if hasattr(msg, 'mname') else ''),
         'ts': (msg.cdt.isoformat() if msg.cdt else None),
         'username': uname,
         'name': name,
@@ -98,6 +103,7 @@ def cpack(s, chat, vid=0):
             'name': r[2],
             'avatar': avurl(r[3]),
             'role': (r[4] or 'member'),
+            'online': wson(r[0]),
         }
         for r in rows
     ]
