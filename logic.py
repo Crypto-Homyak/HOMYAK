@@ -62,7 +62,12 @@ def crole(s, cid, uid):
 def cadm(mem):
     if not mem:
         return False
-    return (mem.role or '').strip().lower() == 'admin'
+    role = ''
+    if isinstance(mem, dict):
+        role = mem.get('role') or ''
+    else:
+        role = getattr(mem, 'role', '') or ''
+    return role.strip().lower() == 'admin'
 
 
 def cown(chat, uid):

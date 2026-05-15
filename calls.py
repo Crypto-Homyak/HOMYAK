@@ -16,6 +16,7 @@ class Peer:
     uid: int
     pc: object
     snd: dict = field(default_factory=dict)
+    trk: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -28,6 +29,17 @@ class Call:
 
 
 class CallHub:
+    @staticmethod
+    def okinds(sdp):
+        out = set()
+        for ln in (sdp or '').splitlines():
+            ln = ln.strip().lower()
+            if ln.startswith('m=audio '):
+                out.add('audio')
+            elif ln.startswith('m=video '):
+                out.add('video')
+        return out or {'audio'}
+
     def init(self):
         self.lk = threading.Lock()
         self.mp = {}
@@ -106,6 +118,31 @@ class CallHub:
         fut = asyncio.run_coroutine_threadsafe(self.aice(cid, uid, ice), self.loop)
         fut.result(timeout=20)
 
+    async def link(self, src, dst):
+        if not src or not dst:
+            return
+        for k, trk in list(src.trk.items()):
+            sndr = dst.snd.get(k)
+            if not sndr or not trk:
+                continue
+            try:
+                relt = self.rel.subscribe(trk) if self.rel else trk
+                rep = sndr.replaceTrack(relt)
+                if asyncio.iscoroutine(rep):
+                    await rep
+            except Exception:
+                continue
+
+    async def bridge(self, c):
+        if not c:
+            return
+        pa = c.prs.get(int(c.a))
+        pb = c.prs.get(int(c.b))
+        if not pa or not pb:
+            return
+        await self.link(pa, pb)
+        await self.link(pb, pa)
+
     async def aoffer(self, cid, uid, sdp, typ):
         c = self.get(cid)
         if not c:
@@ -113,13 +150,15 @@ class CallHub:
         uid = int(uid)
         p = c.prs.get(uid)
         if not p:
-            p = await self.mkpeer(c, uid)
+            p = await self.mkpeer(c, uid, self.okinds(sdp))
             c.prs[uid] = p
 
         off = RTCSessionDescription(sdp=sdp, type=typ)
         await p.pc.setRemoteDescription(off)
+        await self.bridge(c)
         ans = await p.pc.createAnswer()
         await p.pc.setLocalDescription(ans)
+        await self.bridge(c)
         return {'sdp': p.pc.localDescription.sdp, 'type': p.pc.localDescription.type}
 
     async def aice(self, cid, uid, ice):
@@ -148,14 +187,17 @@ class CallHub:
             cand.sdpMLineIndex = int(idx)
         return cand
 
-    async def mkpeer(self, c, uid):
+    async def mkpeer(self, c, uid, kinds=None):
         pc = RTCPeerConnection()
         snd = {}
+        kinds = set(kinds or {'audio', 'video'})
         try:
-            ta = pc.addTransceiver('audio', direction='sendrecv')
-            tv = pc.addTransceiver('video', direction='sendrecv')
-            snd['audio'] = ta.sender
-            snd['video'] = tv.sender
+            if 'audio' in kinds:
+                ta = pc.addTransceiver('audio', direction='sendrecv')
+                snd['audio'] = ta.sender
+            if 'video' in kinds:
+                tv = pc.addTransceiver('video', direction='sendrecv')
+                snd['video'] = tv.sender
         except Exception:
             pass
 
@@ -163,20 +205,8 @@ class CallHub:
 
         @pc.on('track')
         async def ontrk(trk):
-            oid = self.mate(c, uid)
-            op = c.prs.get(int(oid))
-            if not op:
-                return
-            sndr = op.snd.get(trk.kind)
-            if not sndr:
-                return
-            try:
-                relt = self.rel.subscribe(trk)
-                rep = sndr.replaceTrack(relt)
-                if asyncio.iscoroutine(rep):
-                    await rep
-            except Exception:
-                return
+            p.trk[trk.kind] = trk
+            await self.bridge(c)
 
         @pc.on('connectionstatechange')
         async def onst():
