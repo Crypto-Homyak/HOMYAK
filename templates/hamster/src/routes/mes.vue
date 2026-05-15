@@ -18,6 +18,7 @@ import {
 import MobileBottomNav from '@/components/MobileBottomNav.vue'
 import chatsGif from '@/assets/icons/chats.gif'
 import halrGif from '@/assets/icons/halr.gif'
+import callMp3 from '@/assets/sounds/call.mp3'
 
 type ViewMode = 'chats' | 'calls' | 'settings'
 type ProfileMode = 'user' | 'chat'
@@ -183,19 +184,34 @@ let popupRemoteVideo: HTMLVideoElement | null = null
 let popupStatus: HTMLElement | null = null
 let popupMicBtn: HTMLButtonElement | null = null
 let popupCamBtn: HTMLButtonElement | null = null
+let ringAudio: HTMLAudioElement | null = null
+
+function playRing(): void {
+  if (ringAudio) {
+    ringAudio.pause()
+    ringAudio.currentTime = 0
+  }
+  ringAudio = new Audio(callMp3)
+  ringAudio.loop = true
+  ringAudio.play().catch(() => null)
+}
+
+function stopRing(): void {
+  if (ringAudio) {
+    ringAudio.pause()
+    ringAudio.currentTime = 0
+    ringAudio = null
+  }
+}
 
 const activeChat = computed(() => chats.value.find((x) => x.id === activeChatId.value) || null)
 const canWrite = computed(() => Boolean(activeChat.value?.can_w))
 const activeMessages = computed(() => {
-  if (activeChatId.value <= 0) {
-    return []
-  }
+  if (activeChatId.value <= 0) return []
   return messagesByChat[activeChatId.value] || []
 })
 const activePeer = computed(() => {
-  if (!activeChat.value || !me.value || activeChat.value.kind !== 'dm') {
-    return null
-  }
+  if (!activeChat.value || !me.value || activeChat.value.kind !== 'dm') return null
   return activeChat.value.members.find((x) => x.id !== me.value!.id) || null
 })
 
@@ -219,9 +235,7 @@ const mobileViewMode = computed<ViewMode>({
 const filteredChats = computed(() => {
   const q = search.value.trim().toLowerCase()
   const sorted = [...chats.value].sort((a, b) => (b.last?.id || 0) - (a.last?.id || 0))
-  if (!q) {
-    return sorted
-  }
+  if (!q) return sorted
   return sorted.filter((x) => {
     const t = chatTitle(x).toLowerCase()
     const p = (x.last?.txt || '').toLowerCase()
@@ -231,28 +245,21 @@ const filteredChats = computed(() => {
 
 function setToast(text: string): void {
   toast.value = text
-  if (toastTimer) {
-    window.clearTimeout(toastTimer)
-  }
-  toastTimer = window.setTimeout(() => {
-    toast.value = ''
-  }, 2600)
+  if (toastTimer) window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => { toast.value = '' }, 2600)
 }
 
 function clearAuthAndBack(): void {
   localStorage.removeItem('hamster_token')
   localStorage.removeItem('hamster_user')
   manualWsClose = true
-  if (ws) {
-    ws.close()
-  }
+  if (ws) ws.close()
   void router.push('/')
 }
 
 function fmtTime(ts: string | null): string {
   if (!ts) return ''
-  const d = new Date(ts)
-  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 
 function fmtDateTime(ts: string | null): string {
@@ -265,17 +272,13 @@ function avatarText(name: string): string {
 }
 
 function chatTitle(chat: ChatItem): string {
-  if (chat.kind !== 'dm' || !me.value) {
-    return chat.title
-  }
+  if (chat.kind !== 'dm' || !me.value) return chat.title
   const peer = chat.members.find((x) => x.id !== me.value!.id)
   return peer?.name || peer?.username || chat.title
 }
 
 function chatAvatar(chat: ChatItem): string {
-  if (chat.kind !== 'dm' || !me.value) {
-    return ''
-  }
+  if (chat.kind !== 'dm' || !me.value) return ''
   return chat.members.find((x) => x.id !== me.value!.id)?.avatar || ''
 }
 
@@ -358,24 +361,18 @@ function patchUser(user: UserLite): void {
       chat.last.username = user.username
     }
   }
-  if (infoUser.value && infoUser.value.id === user.id) {
-    infoUser.value = user
-  }
+  if (infoUser.value && infoUser.value.id === user.id) infoUser.value = user
 }
 
 function addMessage(msg: WsMessage): void {
   const arr = messagesByChat[msg.cid] || []
-  if (arr.some((x) => x.id === msg.id)) {
-    return
-  }
+  if (arr.some((x) => x.id === msg.id)) return
   arr.push(msg)
   arr.sort((a, b) => a.id - b.id)
   messagesByChat[msg.cid] = arr
   const chat = chats.value.find((x) => x.id === msg.cid)
   if (chat) chat.last = msg
-  if (activeChatId.value === msg.cid) {
-    void scrollToBottom()
-  }
+  if (activeChatId.value === msg.cid) void scrollToBottom()
 }
 
 function resolvePending(pack: WsPacket): boolean {
@@ -402,9 +399,7 @@ function rejectAllPending(reason: string): void {
 }
 
 function sendAndWait(payload: Record<string, unknown>, expectAct?: string, timeoutMs = 15000): Promise<WsPacket> {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    return Promise.reject(new Error('WS closed'))
-  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('WS closed'))
   const act = (expectAct || payload.act || '').toString()
   if (!act) return Promise.reject(new Error('bad act'))
   return new Promise((resolve, reject) => {
@@ -417,7 +412,6 @@ function sendAndWait(payload: Record<string, unknown>, expectAct?: string, timeo
       }
       reject(new Error(`timeout: ${act}`))
     }, timeoutMs)
-
     const arr = pending.get(act) || []
     arr.push({ resolve, reject, timer })
     pending.set(act, arr)
@@ -432,9 +426,7 @@ function sendNoWait(payload: Record<string, unknown>): void {
 
 async function fetchMe(): Promise<boolean> {
   try {
-    const res = await fetch(apiUrl('/me'), {
-      headers: { Authorization: `Bearer ${token.value}` },
-    })
+    const res = await fetch(apiUrl('/me'), { headers: { Authorization: `Bearer ${token.value}` } })
     const dat = (await res.json()) as { ok?: boolean; user?: UserLite; err?: string }
     if (!res.ok || !dat.ok || !dat.user) {
       socketErr.value = dat.err || 'auth failed'
@@ -454,9 +446,7 @@ async function fetchMe(): Promise<boolean> {
 
 async function scrollToBottom(): Promise<void> {
   await nextTick()
-  if (messageScroller.value) {
-    messageScroller.value.scrollTop = messageScroller.value.scrollHeight
-  }
+  if (messageScroller.value) messageScroller.value.scrollTop = messageScroller.value.scrollHeight
 }
 
 async function loadChats(): Promise<void> {
@@ -464,9 +454,7 @@ async function loadChats(): Promise<void> {
   if (!res.ok) throw new Error((res.err || 'get_chats failed').toString())
   chats.value = (res.items as ChatItem[] | undefined) || []
   const first = chats.value[0]
-  if (!activeChatId.value && first) {
-    await selectChat(first.id)
-  }
+  if (!activeChatId.value && first) await selectChat(first.id)
 }
 
 async function loadMessages(cid: number): Promise<void> {
@@ -508,10 +496,7 @@ function setViewMode(next: ViewMode): void {
 async function sendText(): Promise<void> {
   const txt = draft.value.trim()
   if (!txt || !activeChatId.value) return
-  if (!canWrite.value) {
-    setToast('В этот чат нельзя писать')
-    return
-  }
+  if (!canWrite.value) { setToast('В этот чат нельзя писать'); return }
   draft.value = ''
   const res = await sendAndWait({ act: 'send_msg', cid: activeChatId.value, txt }, 'send_msg')
   if (!res.ok) setToast((res.err || 'Ошибка отправки').toString())
@@ -531,10 +516,7 @@ async function pickFile(ev: Event): Promise<void> {
   const one = inp.files?.[0]
   inp.value = ''
   if (!one || !activeChatId.value) return
-  if (!canWrite.value) {
-    setToast('В этот чат нельзя писать')
-    return
-  }
+  if (!canWrite.value) { setToast('В этот чат нельзя писать'); return }
   try {
     const url = await uploadOnlySq(one)
     const res = await sendAndWait({ act: 'send_msg', cid: activeChatId.value, kind: 'file', url, fname: one.name }, 'send_msg')
@@ -547,9 +529,7 @@ async function pickFile(ev: Event): Promise<void> {
 async function deleteChatSelf(cid: number): Promise<void> {
   if (!confirm('Удалить чат?')) return
   const res = await sendAndWait({ act: 'chat_delself', cid }, 'chat_delself')
-  if (!res.ok) {
-    setToast((res.err || 'Не удалось удалить чат').toString())
-  }
+  if (!res.ok) setToast((res.err || 'Не удалось удалить чат').toString())
 }
 
 function onChatContextMenu(e: MouseEvent, chat: ChatItem): void {
@@ -570,10 +550,7 @@ async function kickMember(memberId: number): Promise<void> {
   if (!infoChat.value || !canKick(memberId)) return
   if (!confirm('Кикнуть участника из чата?')) return
   const res = await sendAndWait({ act: 'chat_kick', cid: infoChat.value.id, uid: memberId }, 'chat_kick')
-  if (!res.ok) {
-    setToast((res.err || 'Не удалось кикнуть').toString())
-    return
-  }
+  if (!res.ok) { setToast((res.err || 'Не удалось кикнуть').toString()); return }
   setToast('Участник удален')
 }
 
@@ -596,10 +573,7 @@ async function pickAvatar(ev: Event): Promise<void> {
       body: fd,
     })
     const dat = (await res.json()) as { ok?: boolean; user?: UserLite; err?: string }
-    if (!res.ok || !dat.ok || !dat.user) {
-      setToast(dat.err || 'Не удалось обновить аватар')
-      return
-    }
+    if (!res.ok || !dat.ok || !dat.user) { setToast(dat.err || 'Не удалось обновить аватар'); return }
     patchUser(dat.user)
   } catch {
     setToast('Ошибка загрузки аватара')
@@ -623,10 +597,7 @@ async function searchUsersByText(q: string): Promise<void> {
 
 async function openDm(user: UserLite): Promise<void> {
   const res = await sendAndWait({ act: 'open_dm', to: user.username }, 'open_dm')
-  if (!res.ok || !res.chat) {
-    setToast((res.err || 'Не удалось открыть чат').toString())
-    return
-  }
+  if (!res.ok || !res.chat) { setToast((res.err || 'Не удалось открыть чат').toString()); return }
   const chat = res.chat as ChatItem
   patchChat(chat)
   await selectChat(chat.id)
@@ -642,21 +613,12 @@ function openCreate(kind: 'group' | 'channel'): void {
 
 async function createChatSubmit(): Promise<void> {
   const ttl = createModal.title.trim()
-  if (!ttl) {
-    setToast('Нужно название')
-    return
-  }
+  if (!ttl) { setToast('Нужно название'); return }
   createModal.busy = true
   try {
-    const members = createModal.members
-      .split(',')
-      .map((x) => x.trim())
-      .filter(Boolean)
+    const members = createModal.members.split(',').map((x) => x.trim()).filter(Boolean)
     const res = await sendAndWait({ act: 'create_chat', title: ttl, kind: createModal.kind, members }, 'create_chat')
-    if (!res.ok || !res.chat) {
-      setToast((res.err || 'Не удалось создать чат').toString())
-      return
-    }
+    if (!res.ok || !res.chat) { setToast((res.err || 'Не удалось создать чат').toString()); return }
     const chat = res.chat as ChatItem
     patchChat(chat)
     createModal.open = false
@@ -696,10 +658,7 @@ async function saveSettings(): Promise<void> {
   try {
     const res = await fetch(apiUrl('/profile'), {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token.value}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${token.value}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: settingsForm.name.trim(),
         username: settingsForm.username.trim().toLowerCase(),
@@ -708,10 +667,7 @@ async function saveSettings(): Promise<void> {
       }),
     })
     const dat = (await res.json()) as { ok?: boolean; user?: UserLite; err?: string }
-    if (!res.ok || !dat.ok || !dat.user) {
-      setToast(dat.err || 'Не удалось сохранить профиль')
-      return
-    }
+    if (!res.ok || !dat.ok || !dat.user) { setToast(dat.err || 'Не удалось сохранить профиль'); return }
     patchUser(dat.user)
     setToast('Профиль обновлен')
   } finally {
@@ -740,10 +696,7 @@ function callStatusText(st: string): string {
 function ensurePopup(): void {
   if (callPopup && !callPopup.closed) return
   callPopup = window.open('', 'hamster_call_window', 'width=980,height=700,resizable=yes')
-  if (!callPopup) {
-    setToast('Браузер блокирует окно звонка')
-    return
-  }
+  if (!callPopup) { setToast('Браузер блокирует окно звонка'); return }
   callPopup.document.write(`
 <!doctype html>
 <html lang="ru">
@@ -813,10 +766,7 @@ function toggleMic(): void {
 function toggleCamera(): void {
   if (!localStream) return
   const tracks = localStream.getVideoTracks()
-  if (!tracks.length) {
-    setToast('Камера не подключена, звонок идет по аудио')
-    return
-  }
+  if (!tracks.length) { setToast('Камера не подключена, звонок идет по аудио'); return }
   const next = !call.camOff
   for (const t of tracks) t.enabled = !next
   call.camOff = next
@@ -824,9 +774,7 @@ function toggleCamera(): void {
 }
 
 async function ensureMedia(): Promise<void> {
-  if (localStream) {
-    for (const t of localStream.getTracks()) t.stop()
-  }
+  if (localStream) for (const t of localStream.getTracks()) t.stop()
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
     call.camOff = false
@@ -841,9 +789,7 @@ async function ensureMedia(): Promise<void> {
 function ensurePeer(): void {
   if (pc) return
   remoteStream = new MediaStream()
-  pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-  })
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
   pc.ontrack = (ev) => {
     if (!remoteStream) remoteStream = new MediaStream()
     for (const t of ev.streams[0]?.getTracks() || [ev.track]) {
@@ -856,11 +802,7 @@ function ensurePeer(): void {
     sendNoWait({
       act: 'call_ice',
       cid: call.cid,
-      ice: {
-        candidate: ev.candidate.candidate,
-        sdpMid: ev.candidate.sdpMid,
-        sdpMLineIndex: ev.candidate.sdpMLineIndex,
-      },
+      ice: { candidate: ev.candidate.candidate, sdpMid: ev.candidate.sdpMid, sdpMLineIndex: ev.candidate.sdpMLineIndex },
     })
   }
 }
@@ -893,9 +835,7 @@ async function startWebrtc(): Promise<void> {
     ensurePeer()
     await ensureMedia()
     if (!pc || !localStream) return
-    for (const t of localStream.getTracks()) {
-      pc.addTrack(t, localStream)
-    }
+    for (const t of localStream.getTracks()) pc.addTrack(t, localStream)
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     const ans = await sendAndWait({ act: 'call_offer', cid: call.cid, sdp: offer.sdp, type: offer.type }, 'call_ans', 25000)
@@ -913,19 +853,14 @@ async function startWebrtc(): Promise<void> {
 
 async function startCall(): Promise<void> {
   const chat = activeChat.value
-  if (!chat || chat.kind !== 'dm') {
-    setToast('Звонки только в личных чатах')
-    return
-  }
+  if (!chat || chat.kind !== 'dm') { setToast('Звонки только в личных чатах'); return }
   const res = await sendAndWait({ act: 'call_start', cid: chat.id }, 'call_start')
-  if (!res.ok) {
-    setToast((res.err || 'Не удалось начать звонок').toString())
-    return
-  }
+  if (!res.ok) { setToast((res.err || 'Не удалось начать звонок').toString()); return }
   call.cid = String(res.cid || '')
   call.chat = Number(res.chat || chat.id)
   call.status = 'ringing'
   call.note = 'Ждем ответ...'
+  playRing()
   ensurePopup()
   updatePopupUi()
 }
@@ -935,6 +870,7 @@ async function acceptCall(): Promise<void> {
   call.cid = incomingCall.value.cid
   call.chat = incomingCall.value.chat
   incomingCall.value = null
+  stopRing()
   const res = await sendAndWait({ act: 'call_acc', cid: call.cid }, 'call_acc')
   if (!res.ok) {
     call.status = 'error'
@@ -951,13 +887,13 @@ async function rejectCall(): Promise<void> {
   if (!incomingCall.value) return
   const cid = incomingCall.value.cid
   incomingCall.value = null
+  stopRing()
   await sendAndWait({ act: 'call_rej', cid }, 'call_rej').catch(() => null)
 }
 
 async function endCall(): Promise<void> {
-  if (call.cid) {
-    await sendAndWait({ act: 'call_end', cid: call.cid }, 'call_end').catch(() => null)
-  }
+  if (call.cid) await sendAndWait({ act: 'call_end', cid: call.cid }, 'call_end').catch(() => null)
+  stopRing()
   stopWebrtc(true)
   call.cid = ''
   call.chat = 0
@@ -989,41 +925,23 @@ async function connectWs(): Promise<void> {
   }
   ws.onmessage = async (ev: MessageEvent) => {
     let pack: WsPacket = {}
-    try {
-      pack = JSON.parse(ev.data as string) as WsPacket
-    } catch {
-      return
-    }
+    try { pack = JSON.parse(ev.data as string) as WsPacket } catch { return }
     if (resolvePending(pack)) return
     const act = (pack.act || '').toString()
 
-    if (act === 'msg' && pack.ok && pack.msg) {
-      addMessage(pack.msg as WsMessage)
-      return
-    }
-    if ((act === 'chat_new' || act === 'chat_upd' || act === 'chat_recent') && pack.ok && pack.chat) {
-      patchChat(pack.chat as ChatItem)
-      return
-    }
+    if (act === 'msg' && pack.ok && pack.msg) { addMessage(pack.msg as WsMessage); return }
+    if ((act === 'chat_new' || act === 'chat_upd' || act === 'chat_recent') && pack.ok && pack.chat) { patchChat(pack.chat as ChatItem); return }
     if (act === 'chat_del' && pack.ok && typeof pack.cid === 'number') {
       chats.value = chats.value.filter((x) => x.id !== pack.cid)
       delete messagesByChat[pack.cid]
       if (activeChatId.value === pack.cid) activeChatId.value = 0
       return
     }
-    if (act === 'user_upd' && pack.ok && pack.user) {
-      patchUser(pack.user as UserLite)
-      return
-    }
-    if (act === 'presence' && pack.ok) {
-      setOnline(Number(pack.uid || 0), Boolean(pack.online))
-      return
-    }
+    if (act === 'user_upd' && pack.ok && pack.user) { patchUser(pack.user as UserLite); return }
+    if (act === 'presence' && pack.ok) { setOnline(Number(pack.uid || 0), Boolean(pack.online)); return }
     if (act === 'presence_bulk' && pack.ok) {
       const ids = new Set(((pack.uids as number[] | undefined) || []).map((x) => Number(x)))
-      for (const chat of chats.value) {
-        for (const m of chat.members) m.online = ids.has(m.id)
-      }
+      for (const chat of chats.value) for (const m of chat.members) m.online = ids.has(m.id)
       if (me.value) me.value.online = ids.has(me.value.id)
       return
     }
@@ -1033,6 +951,7 @@ async function connectWs(): Promise<void> {
         chat: Number(pack.chat || 0),
         from: (pack.from || { id: 0, username: '', name: '' }) as { id: number; username: string; name: string },
       }
+      playRing()
       return
     }
     if (act === 'call_ring' && pack.ok) {
@@ -1040,6 +959,7 @@ async function connectWs(): Promise<void> {
       call.chat = Number(pack.chat || 0)
       call.status = 'ringing'
       call.note = 'Ожидание ответа'
+      playRing()
       ensurePopup()
       updatePopupUi()
       return
@@ -1048,10 +968,12 @@ async function connectWs(): Promise<void> {
       if (!call.cid) call.cid = String(pack.cid || '')
       call.status = 'talk'
       call.note = 'Звонок активен'
+      stopRing()
       await startWebrtc()
       return
     }
     if (act === 'call_stop' && pack.ok) {
+      stopRing()
       stopWebrtc(true)
       call.cid = ''
       call.chat = 0
@@ -1071,13 +993,9 @@ async function connectWs(): Promise<void> {
   ws.onclose = () => {
     connected.value = false
     rejectAllPending('ws closed')
-    if (!manualWsClose) {
-      reconnectTimer = window.setTimeout(() => void connectWs(), 1800)
-    }
+    if (!manualWsClose) reconnectTimer = window.setTimeout(() => void connectWs(), 1800)
   }
-  ws.onerror = () => {
-    socketErr.value = 'Ошибка WS'
-  }
+  ws.onerror = () => { socketErr.value = 'Ошибка WS' }
 }
 
 async function logout(): Promise<void> {
@@ -1096,17 +1014,9 @@ function syncMobileLayout(): void {
   if (typeof window === 'undefined') return
   const mobile = window.matchMedia('(max-width: 860px)').matches
   isMobile.value = mobile
-  if (!mobile) {
-    mobilePane.value = 'list'
-    return
-  }
-  if (viewMode.value !== 'chats') {
-    mobilePane.value = 'list'
-    return
-  }
-  if (!activeChatId.value) {
-    mobilePane.value = 'list'
-  }
+  if (!mobile) { mobilePane.value = 'list'; return }
+  if (viewMode.value !== 'chats') { mobilePane.value = 'list'; return }
+  if (!activeChatId.value) mobilePane.value = 'list'
 }
 
 watch(search, (v) => void searchUsersByText(v))
@@ -1117,9 +1027,7 @@ watch(viewMode, async (v) => {
 })
 watch(activeChatId, () => {
   if (!isMobile.value || viewMode.value !== 'chats') return
-  if (activeChatId.value <= 0) {
-    mobilePane.value = 'list'
-  }
+  if (activeChatId.value <= 0) mobilePane.value = 'list'
 })
 watch(
   () => `${call.status}:${call.note}:${call.micMuted}:${call.camOff}`,
@@ -1134,29 +1042,21 @@ onMounted(async () => {
   mobileMql = window.matchMedia('(max-width: 860px)')
   mobileMql.addEventListener('change', syncMobileLayout)
   token.value = localStorage.getItem('hamster_token') || ''
-  if (!token.value) {
-    void router.push('/')
-    return
-  }
+  if (!token.value) { void router.push('/'); return }
   const ok = await fetchMe()
-  if (!ok) {
-    clearAuthAndBack()
-    return
-  }
+  if (!ok) { clearAuthAndBack(); return }
   window.addEventListener('message', onWindowMessage)
   await connectWs()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', onWindowMessage)
-  if (mobileMql) {
-    mobileMql.removeEventListener('change', syncMobileLayout)
-    mobileMql = null
-  }
+  if (mobileMql) { mobileMql.removeEventListener('change', syncMobileLayout); mobileMql = null }
   manualWsClose = true
   if (reconnectTimer) window.clearTimeout(reconnectTimer)
   rejectAllPending('unmount')
   if (ws) ws.close()
+  stopRing()
   stopWebrtc(true)
   if (callPopup && !callPopup.closed) callPopup.close()
 })
@@ -1173,7 +1073,7 @@ onBeforeUnmount(() => {
         <Phone class="ico" /> <span>Звонки</span>
       </button>
       <button type="button" :class="{ active: viewMode === 'settings' }" @click="setViewMode('settings')">
-        <Settings class="ico" /> <span>Настройки</span>
+        <Settings class="ico" /> <span>Софиг</span>
       </button>
       <button type="button" class="logout desktop-only" @click="logout">
         <LogOut class="ico" /> <span>Выйти</span>
@@ -1263,19 +1163,10 @@ onBeforeUnmount(() => {
                 <input type="file" accept="image/*" @change="pickAvatar" />
               </label>
             </div>
-
-            <label>Имя
-              <input v-model="settingsForm.name" type="text" />
-            </label>
-            <label>Username
-              <input v-model="settingsForm.username" type="text" />
-            </label>
-            <label>Телефон
-              <input v-model="settingsForm.phone" type="text" />
-            </label>
-            <label>О себе
-              <textarea v-model="settingsForm.bio" rows="4"></textarea>
-            </label>
+            <label>Имя<input v-model="settingsForm.name" type="text" /></label>
+            <label>Username<input v-model="settingsForm.username" type="text" /></label>
+            <label>Телефон<input v-model="settingsForm.phone" type="text" /></label>
+            <label>О себе<textarea v-model="settingsForm.bio" rows="4"></textarea></label>
             <button type="button" class="save" :disabled="settingsBusy" @click="saveSettings">
               <Shield class="ico" /> {{ settingsBusy ? 'Сохраняем...' : 'Сохранить' }}
             </button>
@@ -1380,12 +1271,8 @@ onBeforeUnmount(() => {
     <div v-if="createModal.open" class="overlay" @click.self="createModal.open = false">
       <div class="modal">
         <h3>{{ createModal.kind === 'group' ? 'Создать группу' : 'Создать канал' }}</h3>
-        <label>Название
-          <input v-model="createModal.title" type="text" />
-        </label>
-        <label>Участники (username через запятую)
-          <input v-model="createModal.members" type="text" placeholder="ivan,olga,max" />
-        </label>
+        <label>Название<input v-model="createModal.title" type="text" /></label>
+        <label>Участники (username через запятую)<input v-model="createModal.members" type="text" placeholder="ivan,olga,max" /></label>
         <button type="button" :disabled="createModal.busy" @click="createChatSubmit">
           {{ createModal.busy ? 'Создаем...' : 'Создать' }}
         </button>
@@ -1415,772 +1302,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700&display=swap');
-
-:global(*) {
-  box-sizing: border-box;
-}
-
-:global(html),
-:global(body),
-:global(#app) {
-  margin: 0;
-  height: 100%;
-  min-height: 100%;
-}
-
-:global(body) {
-  overflow: hidden;
-  color: #ecf4ff;
-  font-family: 'Exo 2', 'Segoe UI', sans-serif;
-  background:
-    radial-gradient(circle at 16% 14%, rgba(36, 93, 205, 0.2), transparent 30%),
-    #080d1a;
-}
-
-.layout {
-  position: fixed;
-  inset: 0;
-  height: auto;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 112px 440px 1fr;
-  background:
-    radial-gradient(circle, rgba(95, 130, 214, 0.12) 1px, transparent 1px),
-    linear-gradient(140deg, rgba(8, 12, 25, 0.95), rgba(8, 12, 25, 0.9));
-  background-size: 24px 24px, 100% 100%;
-}
-
-.ico {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-}
-
-.rail {
-  border-right: 1px solid rgba(72, 96, 145, 0.5);
-  background: #0e1428;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 8px;
-}
-
-.logo {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 10px;
-  border: 1px solid rgba(103, 136, 213, 0.65);
-  overflow: hidden;
-}
-
-.logo img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.rail button {
-  border: 0;
-  background: #1a2f5d;
-  color: #e7f0ff;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  padding: 0 12px;
-  cursor: pointer;
-}
-
-.rail button.active {
-  background: #2b56ae;
-}
-
-.rail .logout {
-  margin-top: auto;
-  background: #57254a;
-}
-
-.left {
-  border-right: 1px solid rgba(72, 96, 145, 0.5);
-  background: rgba(9, 15, 29, 0.9);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  min-height: 0;
-}
-
-.left-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.left-head h1 {
-  margin: 0;
-  font-size: 50px;
-  line-height: 1;
-}
-
-.plus {
-  border: 0;
-  background: #1778ff;
-  color: #fff;
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-.create-menu {
-  border: 1px solid #35528c;
-  background: #121e39;
-}
-
-.create-menu button {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: #eff5ff;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  cursor: pointer;
-}
-
-.search-wrap {
-  border: 1px solid #36518a;
-  background: #111c36;
-  display: grid;
-  grid-template-columns: 20px 1fr;
-  gap: 8px;
-  align-items: center;
-  padding: 9px 10px;
-}
-
-.search-wrap input {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: #edf4ff;
-}
-
-.user-result-list {
-  border: 1px solid #2b426f;
-  background: #111c36;
-  max-height: 230px;
-  overflow: auto;
-}
-
-.user-result {
-  width: 100%;
-  border: 0;
-  border-bottom: 1px solid #253b64;
-  background: transparent;
-  color: #e9f2ff;
-  display: grid;
-  grid-template-columns: 36px 1fr;
-  gap: 8px;
-  padding: 8px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.mini-avatar {
-  width: 36px;
-  height: 36px;
-  background: #355795;
-  display: grid;
-  place-items: center;
-}
-
-.mini-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.u-meta small {
-  color: #abc0e8;
-}
-
-.chat-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 0;
-}
-
-.chat-row {
-  width: 100%;
-  border: 1px solid transparent;
-  background: rgba(27, 42, 78, 0.62);
-  color: #edf3ff;
-  display: grid;
-  grid-template-columns: 50px 1fr auto;
-  gap: 10px;
-  padding: 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.chat-row.active {
-  border-color: #7198ef;
-}
-
-.avatar {
-  width: 50px;
-  height: 50px;
-  background: #3a5d9e;
-  display: grid;
-  place-items: center;
-}
-
-.avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.meta {
-  min-width: 0;
-}
-
-.meta strong,
-.meta small {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.meta small {
-  color: #b3c6ed;
-}
-
-.r-meta {
-  text-align: right;
-  color: #9ab2e1;
-  font-size: 12px;
-}
-
-.content {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: rgba(8, 12, 24, 0.74);
-}
-
-.title-line {
-  height: 64px;
-  border-bottom: 1px solid rgba(72, 96, 145, 0.5);
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  font-size: 24px;
-  font-weight: 700;
-}
-
-.chat-head {
-  height: 70px;
-  border-bottom: 1px solid rgba(72, 96, 145, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-}
-
-.back-chat-list {
-  border: 0;
-  background: #223f74;
-  color: #fff;
-  width: 34px;
-  height: 34px;
-  cursor: pointer;
-}
-
-.peer {
-  border: 0;
-  background: transparent;
-  color: #ecf4ff;
-  text-align: left;
-  cursor: pointer;
-}
-
-.peer strong {
-  display: block;
-  font-size: 36px;
-  line-height: 1;
-}
-
-.peer small {
-  color: #8fd0ff;
-}
-
-.head-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.act-btn {
-  border: 0;
-  background: #1f7cff;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-}
-
-.act-btn input {
-  display: none;
-}
-
-.messages-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 14px;
-}
-
-.msg {
-  max-width: min(68%, 700px);
-  background: #2d457c;
-  border: 1px solid #6288d9;
-  padding: 10px 12px;
-  width: auto;
-}
-
-.msg.mine {
-  align-self: flex-end;
-  background: #2a5bb8;
-}
-
-.msg header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
-}
-
-.msg p {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.msg-image {
-  max-width: 320px;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-}
-
-.file-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.file-name {
-  color: #d8e6ff;
-  text-decoration: underline;
-  word-break: break-word;
-}
-
-.dl-btn {
-  border: 1px solid #5f84d5;
-  background: #1f5ec8;
-  color: #fff;
-  text-decoration: none;
-  padding: 6px 12px;
-}
-
-.composer {
-  height: 62px;
-  border-top: 1px solid rgba(72, 96, 145, 0.5);
-  padding: 8px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
-.composer input {
-  border: 1px solid #37528e;
-  background: #111c36;
-  color: #eff5ff;
-  padding: 10px;
-}
-
-.composer button {
-  border: 0;
-  background: #177cff;
-  color: #fff;
-  padding: 0 14px;
-  cursor: pointer;
-}
-
-.calls-scroll,
-.settings-scroll,
-.info-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 14px;
-}
-
-.call-card {
-  border: 1px solid #335083;
-  background: #14203d;
-  padding: 10px;
-  margin-bottom: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.settings-box,
-.info-card {
-  max-width: 860px;
-  margin: 0 auto;
-  border: 1px solid #35518a;
-  background: #121d38;
-  padding: 18px;
-}
-
-.settings-box {
-  display: grid;
-  gap: 10px;
-}
-
-.big-avatar,
-.info-avatar {
-  width: 120px;
-  height: 120px;
-  margin: 0 auto 14px;
-  position: relative;
-  background: #3a5e9f;
-  display: grid;
-  place-items: center;
-}
-
-.big-avatar img,
-.info-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.fallback {
-  font-size: 44px;
-}
-
-.pick-avatar {
-  position: absolute;
-  right: -8px;
-  bottom: -8px;
-  width: 34px;
-  height: 34px;
-  background: #1984ff;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-.pick-avatar input {
-  display: none;
-}
-
-.settings-box label {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.settings-box input,
-.settings-box textarea {
-  border: 1px solid #36528e;
-  background: #101a31;
-  color: #eff5ff;
-  padding: 10px;
-}
-
-.save {
-  border: 0;
-  background: #2367d1;
-  color: #fff;
-  padding: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.settings-logout {
-  margin-top: 2px;
-  justify-content: center;
-}
-
-.desktop-only {
-  display: flex;
-}
-
-.info-line {
-  justify-content: flex-start;
-  gap: 12px;
-}
-
-.back-btn {
-  border: 0;
-  background: #243f74;
-  color: #fff;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.info-card h2,
-.info-card p {
-  text-align: center;
-}
-
-.info-actions {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.info-actions button {
-  border: 0;
-  background: #26334f;
-  color: #d8e7ff;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: center;
-  cursor: pointer;
-}
-
-.members {
-  margin-top: 12px;
-  border-top: 1px solid #2d426f;
-  padding-top: 12px;
-}
-
-.member-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 0;
-}
-
-.member-row.kickable {
-  cursor: context-menu;
-}
-
-.member-row.kickable:hover {
-  color: #ffccd8;
-}
-
-.empty {
-  flex: 1;
-  display: grid;
-  place-items: center;
-}
-
-.empty img {
-  width: 88px;
-  height: 88px;
-  object-fit: contain;
-}
-
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(3, 8, 18, 0.7);
-  display: grid;
-  place-items: center;
-  z-index: 100;
-}
-
-.modal {
-  width: min(560px, calc(100% - 24px));
-  border: 1px solid #4968aa;
-  background: #121e39;
-  padding: 16px;
-  display: grid;
-  gap: 10px;
-}
-
-.modal input {
-  width: 100%;
-  border: 1px solid #3a548c;
-  background: #111b33;
-  color: #eff5ff;
-  padding: 10px;
-}
-
-.modal button {
-  border: 0;
-  background: #1f7eff;
-  color: #fff;
-  padding: 10px;
-  cursor: pointer;
-}
-
-.call-row {
-  display: flex;
-  gap: 8px;
-}
-
-.call-row .good {
-  background: #0f9563;
-}
-
-.call-row .bad {
-  background: #be3a61;
-}
-
-.hint {
-  color: #9eb8ea;
-}
-
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  border: 1px solid #6e93de;
-  background: #1b3368;
-  color: #ecf4ff;
-  padding: 8px 12px;
-  z-index: 120;
-}
-
-.toast.warn {
-  background: #5c2030;
-  border-color: #cb6a89;
-}
-
-.hidden-media {
-  width: 0;
-  height: 0;
-  overflow: hidden;
-}
-
-@media (max-width: 1024px) {
-  .layout {
-    grid-template-columns: 96px 380px 1fr;
-  }
-
-  .left-head h1 {
-    font-size: 44px;
-  }
-
-  .peer strong {
-    font-size: 30px;
-  }
-}
-
-@media (max-width: 860px) {
-  .layout {
-    position: fixed;
-    inset: 0;
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr;
-    padding-bottom: calc(66px + env(safe-area-inset-bottom));
-  }
-
-  .rail {
-    display: none;
-  }
-
-  .left,
-  .content {
-    border-right: 0;
-    min-height: 0;
-    height: 100%;
-  }
-
-  .left {
-    padding: 12px;
-    gap: 8px;
-  }
-
-  .left-head h1 {
-    font-size: 44px;
-  }
-
-  .chat-row {
-    grid-template-columns: 46px 1fr auto;
-    padding: 8px;
-  }
-
-  .avatar {
-    width: 46px;
-    height: 46px;
-  }
-
-  .chat-head {
-    height: 64px;
-    gap: 8px;
-  }
-
-  .peer strong {
-    font-size: 28px;
-  }
-
-  .head-actions {
-    gap: 6px;
-  }
-
-  .act-btn {
-    padding: 8px 10px;
-    font-size: 13px;
-  }
-
-  .messages-scroll,
-  .calls-scroll,
-  .settings-scroll,
-  .info-scroll {
-    padding: 12px;
-  }
-
-  .settings-box,
-  .info-card {
-    max-width: none;
-    width: 100%;
-  }
-
-  .msg {
-    max-width: min(90%, 560px);
-  }
-
-  .composer {
-    height: 58px;
-  }
-
-  .desktop-only {
-    display: none !important;
-  }
-
-  .toast {
-    bottom: calc(76px + env(safe-area-inset-bottom));
-  }
-}
+@import "@/assets/css/mes.css";
 </style>
-
