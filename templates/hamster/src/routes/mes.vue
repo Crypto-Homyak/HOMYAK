@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useMessenger } from '@/assets/ts/useMessenger'
 import MobileBottomNav from '@/components/MobileBottomNav.vue'
+import { ref } from 'vue'
 import {
   Bell,
   Camera,
@@ -14,7 +15,57 @@ import {
   Settings,
   Shield,
   Users,
+  Mic,
 } from 'lucide-vue-next'
+
+const testmic = async () => {
+  try {
+    if (!window.isSecureContext) {
+      alert('Нужен HTTPS')
+      return
+    }
+
+    const audioCtx = new (window.AudioContext ||
+      (window as any).webkitAudioContext)()
+
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume()
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: {
+        facingMode: 'user',
+      },
+    })
+
+    alert('Микрофон и камера включены')
+
+    console.log(stream)
+
+    if (hiddenLocalVideo.value) {
+      hiddenLocalVideo.value.srcObject = stream
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 3000))
+
+    stream.getTracks().forEach(track => {
+      track.stop()
+    })
+
+    if (hiddenLocalVideo.value) {
+      hiddenLocalVideo.value.srcObject = null
+    }
+
+    await audioCtx.close()
+
+    alert('Микрофон и камера выключены')
+  } catch (err: any) {
+    console.error(err)
+
+    alert(`${err.name}: ${err.message}`)
+  }
+}
 
 const {
   // state
@@ -163,6 +214,9 @@ const {
             </button>
             <button type="button" class="logout settings-logout" @click="logout">
               <LogOut class="ico" /> Выйти
+            </button>
+            <button type="button" class="logout settings-logout" @click="testmic">
+              <Mic class="ico" /> Микрофон
             </button>
           </div>
         </div>

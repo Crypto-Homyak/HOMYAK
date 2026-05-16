@@ -155,27 +155,29 @@ class CallHub:
 
         off = RTCSessionDescription(sdp=sdp, type=typ)
         await p.pc.setRemoteDescription(off)
-        await self.bridge(c)
+        
         ans = await p.pc.createAnswer()
         await p.pc.setLocalDescription(ans)
-        await self.bridge(c)
+        
         return {'sdp': p.pc.localDescription.sdp, 'type': p.pc.localDescription.type}
 
     async def aice(self, cid, uid, ice):
         c = self.get(cid)
-        if not c:
+        if not c or c.st == 'end':
             return
         p = c.prs.get(int(uid))
         if not p:
             return
         cnd = (ice.get('candidate') or '').strip()
-        mid = ice.get('sdpMid')
-        idx = ice.get('sdpMLineIndex')
         if not cnd:
             return
-        obj = self.cobj(cnd, mid, idx)
+        
+        obj = self.cobj(cnd, ice.get('sdpMid'), ice.get('sdpMLineIndex'))
         if obj:
-            await p.pc.addIceCandidate(obj)
+            try:
+                await p.pc.addIceCandidate(obj)
+            except Exception as e:
+                pass
 
     def cobj(self, cnd, mid, idx):
         raw = cnd
