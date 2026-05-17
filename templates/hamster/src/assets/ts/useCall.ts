@@ -94,7 +94,6 @@ button.end{background:#b5385d}
     popupState.popupCamBtn = null
   }
 
-
   function hydrateMedia(): void {
     if (hiddenLocalVideo.value) hiddenLocalVideo.value.srcObject = rtcState.localStream
     if (hiddenRemoteVideo.value) hiddenRemoteVideo.value.srcObject = rtcState.remoteStream
@@ -189,9 +188,7 @@ button.end{background:#b5385d}
   async function startWebrtc(): Promise<void> {
     if (!call.cid) return
     try {
-      ensurePopup()
       ensurePeer()
-      await ensureMedia()
       if (!rtcState.pc || !rtcState.localStream) return
       for (const t of rtcState.localStream.getTracks()) rtcState.pc.addTrack(t, rtcState.localStream)
       const offer = await rtcState.pc.createOffer()
@@ -215,7 +212,6 @@ button.end{background:#b5385d}
     }
   }
 
-
   async function loadCallHistory(): Promise<void> {
     loadingCallHistory.value = true
     try {
@@ -227,6 +223,7 @@ button.end{background:#b5385d}
   }
 
   async function startCall(chatId: number): Promise<void> {
+    await ensureMedia()
     const res = await sendAndWait({ act: 'call_start', cid: chatId }, 'call_start')
     if (!res.ok) { setToast((res.err || 'Не удалось начать звонок').toString()); return }
     call.cid = String(res.cid || '')
@@ -240,6 +237,7 @@ button.end{background:#b5385d}
 
   async function acceptCall(): Promise<void> {
     if (!incomingCall.value) return
+    await ensureMedia()
     call.cid = incomingCall.value.cid
     call.chat = incomingCall.value.chat
     incomingCall.value = null
